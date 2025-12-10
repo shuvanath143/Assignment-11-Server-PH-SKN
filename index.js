@@ -1,0 +1,455 @@
+const express = require("express");
+const cors = require("cors");
+const app = express();
+require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+
+const port = process.env.PORT || 3000;
+
+// Firebase Token
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./digital-life-lessons-skn143-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+
+// middleware
+app.use(express.json())
+app.use(cors())
+
+const verifyFirebaseToken = async (req, res, next) => {
+  // console.log('Headers in middleware: ', req.header.authorization)
+  const token = req.headers.authorization
+
+  if (!token) {
+    res.status(401).send({ message: 'unauthorized access' })
+    next()
+  }
+
+  try {
+    const idToken = token.split(' ')[1]
+    const decoded = await admin.auth().verifyIdToken(idToken)
+    // console.log('After decoded in token: ', decoded)
+    req.decoded_email = decoded.email
+    next()
+  } 
+  catch (error) {
+    return res.status(401).send({ message: "invalid token" });
+  }
+}
+
+
+// db connection
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.0dhjrwr.mongodb.net/?appName=Cluster0`;
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  }
+});
+
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+
+    const db = client.db("digital_life_lessons");
+    const usersCollection = db.collection("users");
+    const lessonsCollection = db.collection("lessons");
+    const favoriteLessonsCollection = db.collection("favoriteLessons");
+    const paymentCollection = db.collection("payment");
+
+    //! ************ Middleware with Database Access *******************
+    // this verification must be used after verifyFirebaseToken
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      console.log("Verify Admin: ", user.role);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      next();
+    };
+
+    //! ************************* users api ****************************
+    app.get("/users/search", verifyFirebaseToken, async (req, res) => {
+      const searchText = req.query.searchText;
+      const query = {};
+
+      if (searchText) {
+        query.$or = [
+          { displayName: { $regex: searchText, $options: "i" } },
+          { email: { $regex: searchText, $options: "i" } },
+        ];
+      }
+
+      const cursor = usersCollection.find(query).sort({ createdAt: -1 });
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      console.log(query.role, query.isPremium)
+      if (req.query.role) {
+        const user = await usersCollection.findOne(query);
+        res.send({ role: user?.role || "user" });
+      }
+      if (req.query.isPremium) {
+        const user = await usersCollection.findOne(query);
+        res.send({ isPremium: user?.isPremium || false });
+      }
+      
+    });
+
+    app.get('/users', async (req, res) => {
+      const email = req.query.email
+      const query = { email }
+      const user = await usersCollection.findOne(query)
+      res.send(user)
+    })
+
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      user.role = "user";
+      (user.isPremium = false),
+        (user.favorites = []),
+        (user.createdAt = new Date());
+
+      const email = user.email;
+      const userExists = await usersCollection.findOne({ email });
+      if (userExists) {
+        return res.send({ message: "User already exists" });
+      }
+
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+    app.patch("/users/:id/role",verifyFirebaseToken,verifyAdmin, async (req, res) => {
+        const id = req.params.id;
+        const roleInfo = req.body;
+        const query = { _id: new ObjectId(id) };
+        const updatedDoc = {
+          $set: {
+            role: roleInfo.role,
+          },
+        };
+        const result = await usersCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    //! ************************* lessons api ****************************
+    app.get("/lessons", async (req, res) => {
+      const query = {}
+      const { isPublic, email } = req.query
+      console.log(isPublic)
+      if (isPublic) {
+        query.visibility = isPublic
+      }
+      if (email) {
+        query.creatorEmail = email
+      }
+      const result = await lessonsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.get("/lessons/:id", async (req, res) => {
+      // console.log(req.params.id)
+      const id = req.params.id;
+      // console.log(id);
+      const lesson = await lessonsCollection.findOne({ _id: new ObjectId(id) });
+      //   console.log(lesson)
+
+      if (!lesson) return res.status(404).send({ message: "Not found" });
+
+      if (lesson.accessLevel === "premium" && !req.user?.isPremium) {
+        return res.status(403).send({
+          locked: true,
+          message: "Upgrade to view premium lesson",
+          preview: {
+            title: lesson.title,
+            shortDescription: lesson.shortDescription,
+          },
+        });
+      }
+
+      //   Count view
+      await lessonsCollection.updateOne({ _id: id }, { $inc: { views: 1 } });
+
+      res.send(lesson);
+    });
+
+    app.post("/lessons", verifyFirebaseToken, async (req, res) => {
+      const data = req.body;
+      const query = {
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const result = await lessonsCollection.insertOne(query);
+
+      res.send(result);
+    });
+
+    app.patch("/lessons/like/:id", verifyFirebaseToken, async (req, res) => {
+      const lessonId = req.params.id;
+      const userEmail = req.query.email;
+      //   console.log(lessonId, userEmail)
+
+      if (!userEmail) {
+        return res
+          .status(401)
+          .send({ message: "Authentication required: User email missing." });
+      }
+
+      try {
+        const query = { _id: new ObjectId(lessonId) };
+
+        const lesson = await lessonsCollection.findOne(query);
+
+        if (!lesson) {
+          return res.status(404).send({ message: "Lesson not found." });
+        }
+
+        const isLiked = lesson.likes.includes(userEmail);
+
+        let updateOperation;
+        let updateCount;
+
+        if (isLiked) {
+          updateOperation = { $pull: { likes: userEmail } };
+          updateCount = -1;
+        } else {
+          updateOperation = { $push: { likes: userEmail } };
+          updateCount = 1;
+        }
+
+        const updateResult = await lessonsCollection.updateOne(query, {
+          ...updateOperation,
+          $inc: { likesCount: updateCount },
+        });
+
+        if (updateResult.modifiedCount === 0) {
+          // console.log(updateResult.modifiedCount);
+          return res.status(200).send({
+            message: isLiked
+              ? "Already disliked or no change made."
+              : "Already liked or no change made.",
+            currentStatus: isLiked ? "disliked" : "liked",
+          });
+        }
+
+        res.send({
+          message: isLiked
+            ? "Lesson disliked successfully."
+            : "Lesson liked successfully.",
+          newLikesCount: lesson.likesCount + updateCount,
+        });
+      } catch (error) {
+        console.error("Error updating like status:", error);
+        res.status(500).send({
+          message: "Failed to update like status.",
+        });
+      }
+    });
+
+    // favorite.............................
+    app.get("/lessons/favorite", verifyFirebaseToken, async (req, res) => {
+      const email = req.query.email;
+      console.log("in favorite", email);
+      if (!email) return res.status(400).send({ message: "Email required" });
+      const query = { email: email };
+      const userFav = await favoriteLessonsCollection.findOne(query);
+      res.send(userFav?.favorites || []);
+    });
+    app.patch(
+      "/lessons/favorite/:id",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const lessonId = req.params.id;
+        //   const userId = new ObjectId(req.user.id);
+        const userEmail = req.query.email;
+
+        const query = { email: userEmail };
+
+        if (!userEmail) {
+          return res
+            .status(401)
+            .send({ message: "Authentication required: User email missing." });
+        }
+
+        try {
+          // get the user’s record
+          let userFavorites = await favoriteLessonsCollection.findOne(query);
+
+          // create empty record if none exists
+          if (!userFavorites) {
+            userFavorites = {
+              email: userEmail,
+              favorites: [],
+              favoritesCount: 0,
+            };
+            await favoriteLessonsCollection.insertOne(userFavorites);
+          }
+
+          // const isFav = userFavorites.favorites?.includes(lessonId);
+
+          // validate ObjectId
+          // if (!ObjectId.isValid(lessonId)) {
+          //   return res.status(400).send({ message: "Invalid lesson ID format." });
+          // }
+          // const lessonObjectId = new ObjectId(lessonId);
+          // toggle favorite
+          const isFav = userFavorites.favorites
+            ?.map((id) => id.toString())
+            .includes(lessonId.toString());
+
+          // Toggle operation
+          const updateOperation = isFav
+            ? {
+                $pull: { favorites: lessonId },
+                $inc: { favoritesCount: -1 },
+              }
+            : {
+                // prevent duplicates automatically
+                $addToSet: { favorites: lessonId },
+                $inc: { favoritesCount: 1 },
+              };
+
+          await favoriteLessonsCollection.updateOne(query, updateOperation);
+
+          res.send({
+            message: isFav ? "Removed from favorites" : "Added to favorites",
+            currentStatus: isFav ? "unfavorite" : "favorite",
+          });
+        } catch (error) {
+          console.error(error);
+          res.status(500).send({ message: "Failed to update favorite" });
+        }
+      }
+    );
+
+    //! ***************** Payment Gateway ******************************
+    //! ***************** Payment Gateway ******************************
+    app.post("/create-checkout-session", async (req, res) => {
+      try {
+        const paymentInfo = req.body;
+
+        const session = await stripe.checkout.sessions.create({
+          line_items: [
+            {
+              price_data: {
+                currency: "BDT",
+                unit_amount: paymentInfo.cost,
+                product_data: {
+                  name: "Premium Membership",
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          customer_email: paymentInfo.email,
+          mode: "payment",
+          metadata: {
+            userId: paymentInfo.userId,
+            userName: paymentInfo.userName,
+          },
+          success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.SITE_DOMAIN}/payment-cancelled`,
+        });
+
+        res.send({ url: session.url });
+      } catch (err) {
+        console.log("STRIPE ERROR:", err);
+        res.status(500).send({ error: err.message });
+      }
+    });
+
+    // Payment success route
+    app.get("/payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      // console.log(session)
+
+      const transactionId = session.payment_intent;
+
+      // Check if already saved
+      const paymentExist = await paymentCollection.findOne({ transactionId });
+      if (paymentExist) {
+        return res.send({
+          message: "already exists",
+          transactionId,
+        });
+      }
+
+      if (session.payment_status === "paid") {
+        const userId = session.metadata.userId;
+        // console.log("userId inside payment success: ", userId)
+        // update user
+        await usersCollection.updateOne(
+          { _id: new ObjectId(userId) },
+          {
+            $set: {
+              isPremium: true,
+            },
+          }
+        );
+
+        // save payment
+        const payment = {
+          amount: session.amount_total,
+          currency: session.currency,
+          userEmail: session.customer_email,
+          userId,
+          userName: session.metadata.userName,
+          transactionId,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+        };
+
+        await paymentCollection.insertOne(payment);
+
+        return res.send({
+          success: true,
+          transactionId,
+          paymentInfo: payment,
+        });
+      }
+
+      return res.send({ success: false });
+    });
+
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
+  } finally {
+    // Ensures that the client will close when you finish/error
+    // await client.close();
+  }
+}
+
+run().catch(console.dir);
+
+app.get("/", (req, res) => {
+  res.send("Digital Life Lessons Platform is running");
+});
+
+app.listen(port, () => {
+  console.log(`Example app listening on port ${port}`);
+});
