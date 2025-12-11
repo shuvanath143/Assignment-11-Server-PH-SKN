@@ -66,6 +66,7 @@ async function run() {
     const lessonsCollection = db.collection("lessons");
     const favoriteLessonsCollection = db.collection("favoriteLessons");
     const paymentCollection = db.collection("payment");
+    const lessonReportsCollection = db.collection("reports");
 
     //! ************ Middleware with Database Access *******************
     // this verification must be used after verifyFirebaseToken
@@ -244,7 +245,6 @@ async function run() {
     });
 
     //! *********************** My lessons api ****************************
-    // GET /lessons/user/:email
     app.get("/lessons/user/:email", async (req, res) => {
       try {
         const email = req.params.email;
@@ -271,7 +271,6 @@ async function run() {
       }
     });
 
-    // PATCH /lessons/:id/visibility
     app.patch("/lessons/:id/visibility", async (req, res) => {
       try {
         const lessonId = req.params.id;
@@ -290,14 +289,13 @@ async function run() {
     });
 
     //! ***************** Favorite Lessons Api ******************************
-
     app.get("/lessons/favorite", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
       console.log("in favorite", email);
       if (!email) return res.status(400).send({ message: "Email required" });
       const query = { email: email };
       const userFav = await favoriteLessonsCollection.findOne(query);
-      console.log(userFav)
+      console.log(userFav);
       res.send(userFav?.favorites || []);
     });
 
@@ -306,7 +304,7 @@ async function run() {
       verifyFirebaseToken,
       async (req, res) => {
         const lessonId = req.params.id;
-        console.log(lessonId)
+        console.log(lessonId);
         //   const userId = new ObjectId(req.user.id);
         const userEmail = req.query.email;
 
@@ -330,12 +328,14 @@ async function run() {
               favorites: [lessonId],
               favoritesCount: 1,
             };
-            const result = await favoriteLessonsCollection.insertOne(userFavorites);
+            const result = await favoriteLessonsCollection.insertOne(
+              userFavorites
+            );
             const lessonUpdateResult = await lessonsCollection.updateOne(
               lessonQuery,
               { $inc: { favoritesCount: 1 } }
             );
-            return res.send(result)
+            return res.send(result);
           }
 
           const isFav = userFavorites.favorites
@@ -354,16 +354,17 @@ async function run() {
                 $inc: { favoritesCount: 1 },
               };
 
-          const result = await favoriteLessonsCollection.updateOne(query, updateOperation);
+          const result = await favoriteLessonsCollection.updateOne(
+            query,
+            updateOperation
+          );
 
-          const lessonUpdatedDoc = isFav ? 
-            { $inc: {favoritesCount: -1 }} 
-            : 
-            { $inc: {favoritesCount: 1 }}
-          await lessonsCollection.updateOne(lessonQuery, lessonUpdatedDoc)
+          const lessonUpdatedDoc = isFav
+            ? { $inc: { favoritesCount: -1 } }
+            : { $inc: { favoritesCount: 1 } };
+          await lessonsCollection.updateOne(lessonQuery, lessonUpdatedDoc);
 
-         
-          return res.send(result)
+          return res.send(result);
         } catch (error) {
           console.error(error);
           res.status(500).send({ message: "Failed to update favorite" });
@@ -396,7 +397,74 @@ async function run() {
 
       res.send(lesson);
     });
-    //! ***************** Payment Gateway ******************************
+
+    //! ***************** Report Lesson ********************************
+    app.post("/lesson-reports", verifyFirebaseToken, async (req, res) => {
+      try {
+        const { lessonId, reporterUserId, reason } = req.body;
+        const query = {
+          _id: new ObjectId(lessonId),
+        }
+        // Fetch lesson details once
+        const lesson = await lessonsCollection.findOne(query);
+
+        if (!lesson) return res.status(404).send({ error: "Lesson not found" });
+
+        const report = {
+          lessonId,
+          lessonTitle: lesson.title,
+          lessonCreator: lesson.creator,
+          lessonCategory: lesson.category,
+          reporterUserId,
+          reason,
+          status: "pending",
+          timestamp: new Date(),
+        };
+
+        const lessonReportCount = await lessonsCollection.updateOne(query, { $inc: { reportsCount: 1 }} );
+        const result = await lessonReportsCollection.insertOne(report);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.get("/lesson-reports", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      try {
+        const query = {}
+        const reports = await lessonReportsCollection
+          .find(query)
+          .sort({ timestamp: -1 })
+          .toArray();
+
+        res.send(reports);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.patch(
+      "/lesson-reports/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const reportId = req.params.id;
+
+          const result = await lessonReportsCollection.updateOne(
+            { _id: new ObjectId(reportId) },
+            { $set: { status: "reviewed" } }
+          );
+
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ error: error.message });
+        }
+      }
+    );
+
+
+
     //! ***************** Payment Gateway ******************************
     app.post("/create-checkout-session", async (req, res) => {
       try {
