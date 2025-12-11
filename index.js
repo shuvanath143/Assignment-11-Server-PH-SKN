@@ -73,7 +73,7 @@ async function run() {
       const email = req.decoded_email;
       const query = { email };
       const user = await usersCollection.findOne(query);
-      console.log("Verify Admin: ", user.role);
+      // console.log("Verify Admin: ", user.role);
 
       if (!user || user.role !== "admin") {
         return res.status(403).send({ message: "Forbidden access" });
@@ -101,7 +101,7 @@ async function run() {
     app.get("/users/:email", async (req, res) => {
       const email = req.params.email;
       const query = { email };
-      console.log(query.role, query.isPremium)
+      // console.log(query.role, query.isPremium);
       if (req.query.role) {
         const user = await usersCollection.findOne(query);
         res.send({ role: user?.role || "user" });
@@ -110,15 +110,14 @@ async function run() {
         const user = await usersCollection.findOne(query);
         res.send({ isPremium: user?.isPremium || false });
       }
-      
     });
 
-    app.get('/users', async (req, res) => {
-      const email = req.query.email
-      const query = { email }
-      const user = await usersCollection.findOne(query)
-      res.send(user)
-    })
+    app.get("/users", async (req, res) => {
+      const email = req.query.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      res.send(user);
+    });
 
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -137,7 +136,11 @@ async function run() {
       res.send(result);
     });
 
-    app.patch("/users/:id/role",verifyFirebaseToken,verifyAdmin, async (req, res) => {
+    app.patch(
+      "/users/:id/role",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
         const id = req.params.id;
         const roleInfo = req.body;
         const query = { _id: new ObjectId(id) };
@@ -153,43 +156,17 @@ async function run() {
 
     //! ************************* lessons api ****************************
     app.get("/lessons", async (req, res) => {
-      const query = {}
-      const { isPublic, email } = req.query
-      console.log(isPublic)
+      const query = {};
+      const { isPublic, email } = req.query;
+      // console.log(isPublic);
       if (isPublic) {
-        query.visibility = isPublic
+        query.visibility = isPublic;
       }
       if (email) {
-        query.creatorEmail = email
+        query.creatorEmail = email;
       }
       const result = await lessonsCollection.find(query).toArray();
       res.send(result);
-    });
-
-    app.get("/lessons/:id", async (req, res) => {
-      // console.log(req.params.id)
-      const id = req.params.id;
-      // console.log(id);
-      const lesson = await lessonsCollection.findOne({ _id: new ObjectId(id) });
-      //   console.log(lesson)
-
-      if (!lesson) return res.status(404).send({ message: "Not found" });
-
-      if (lesson.accessLevel === "premium" && !req.user?.isPremium) {
-        return res.status(403).send({
-          locked: true,
-          message: "Upgrade to view premium lesson",
-          preview: {
-            title: lesson.title,
-            shortDescription: lesson.shortDescription,
-          },
-        });
-      }
-
-      //   Count view
-      await lessonsCollection.updateOne({ _id: id }, { $inc: { views: 1 } });
-
-      res.send(lesson);
     });
 
     app.post("/lessons", verifyFirebaseToken, async (req, res) => {
@@ -266,20 +243,70 @@ async function run() {
       }
     });
 
-    // favorite.............................
+    //! *********************** My lessons api ****************************
+    // GET /lessons/user/:email
+    app.get("/lessons/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const query = {};
+        if (email) {
+          query.creatorEmail = email;
+        }
+        const lessons = await lessonsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        // Add reaction and save counts if needed
+        const enrichedLessons = lessons.map((lesson) => ({
+          ...lesson,
+          likesCount: lesson?.likesCount || 0,
+          favoritesCount: lesson?.favoritesCount || 0,
+        }));
+
+        res.send(enrichedLessons);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to fetch lessons" });
+      }
+    });
+
+    // PATCH /lessons/:id/visibility
+    app.patch("/lessons/:id/visibility", async (req, res) => {
+      try {
+        const lessonId = req.params.id;
+        const { visibility } = req.body; // expected: "public" or "private"
+
+        const result = await lessonsCollection.updateOne(
+          { _id: new ObjectId(lessonId) },
+          { $set: { visibility } }
+        );
+
+        res.send({ success: result.modifiedCount > 0 });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update visibility" });
+      }
+    });
+
+    //! ***************** Favorite Lessons Api ******************************
+
     app.get("/lessons/favorite", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
       console.log("in favorite", email);
       if (!email) return res.status(400).send({ message: "Email required" });
       const query = { email: email };
       const userFav = await favoriteLessonsCollection.findOne(query);
+      console.log(userFav)
       res.send(userFav?.favorites || []);
     });
+
     app.patch(
       "/lessons/favorite/:id",
       verifyFirebaseToken,
       async (req, res) => {
         const lessonId = req.params.id;
+        console.log(lessonId)
         //   const userId = new ObjectId(req.user.id);
         const userEmail = req.query.email;
 
@@ -293,26 +320,24 @@ async function run() {
 
         try {
           // get the user’s record
+          const lessonQuery = { _id: new ObjectId(lessonId) };
           let userFavorites = await favoriteLessonsCollection.findOne(query);
 
           // create empty record if none exists
           if (!userFavorites) {
             userFavorites = {
               email: userEmail,
-              favorites: [],
-              favoritesCount: 0,
+              favorites: [lessonId],
+              favoritesCount: 1,
             };
-            await favoriteLessonsCollection.insertOne(userFavorites);
+            const result = await favoriteLessonsCollection.insertOne(userFavorites);
+            const lessonUpdateResult = await lessonsCollection.updateOne(
+              lessonQuery,
+              { $inc: { favoritesCount: 1 } }
+            );
+            return res.send(result)
           }
 
-          // const isFav = userFavorites.favorites?.includes(lessonId);
-
-          // validate ObjectId
-          // if (!ObjectId.isValid(lessonId)) {
-          //   return res.status(400).send({ message: "Invalid lesson ID format." });
-          // }
-          // const lessonObjectId = new ObjectId(lessonId);
-          // toggle favorite
           const isFav = userFavorites.favorites
             ?.map((id) => id.toString())
             .includes(lessonId.toString());
@@ -329,12 +354,16 @@ async function run() {
                 $inc: { favoritesCount: 1 },
               };
 
-          await favoriteLessonsCollection.updateOne(query, updateOperation);
+          const result = await favoriteLessonsCollection.updateOne(query, updateOperation);
 
-          res.send({
-            message: isFav ? "Removed from favorites" : "Added to favorites",
-            currentStatus: isFav ? "unfavorite" : "favorite",
-          });
+          const lessonUpdatedDoc = isFav ? 
+            { $inc: {favoritesCount: -1 }} 
+            : 
+            { $inc: {favoritesCount: 1 }}
+          await lessonsCollection.updateOne(lessonQuery, lessonUpdatedDoc)
+
+         
+          return res.send(result)
         } catch (error) {
           console.error(error);
           res.status(500).send({ message: "Failed to update favorite" });
@@ -342,6 +371,31 @@ async function run() {
       }
     );
 
+    app.get("/lessons/:id", async (req, res) => {
+      // console.log(req.params.id)
+      const id = req.params?.id;
+      // console.log(id);
+      const lesson = await lessonsCollection.findOne({ _id: new ObjectId(id) });
+      //   console.log(lesson)
+
+      if (!lesson) return res.status(404).send({ message: "Not found" });
+
+      if (lesson.accessLevel === "premium" && !req.user?.isPremium) {
+        return res.status(403).send({
+          locked: true,
+          message: "Upgrade to view premium lesson",
+          preview: {
+            title: lesson.title,
+            shortDescription: lesson.shortDescription,
+          },
+        });
+      }
+
+      //   Count view
+      await lessonsCollection.updateOne({ _id: id }, { $inc: { views: 1 } });
+
+      res.send(lesson);
+    });
     //! ***************** Payment Gateway ******************************
     //! ***************** Payment Gateway ******************************
     app.post("/create-checkout-session", async (req, res) => {
