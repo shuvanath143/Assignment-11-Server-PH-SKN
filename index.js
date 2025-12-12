@@ -113,19 +113,24 @@ async function run() {
       }
     });
 
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const email = req.query.email;
-      const query = { email };
-      const user = await usersCollection.findOne(query);
-      res.send(user);
+      const query = {};
+
+      if (email) {
+        query.email = email
+      }
+      const user = await usersCollection.find(query).toArray();
+      console.log(user)
+      return res.send(user);
     });
 
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
-      (user.isPremium = false),
-        (user.favorites = []),
-        (user.createdAt = new Date());
+      user.isPremium = false
+      user.favorites = []
+      user.createdAt = new Date()
 
       const email = user.email;
       const userExists = await usersCollection.findOne({ email });
@@ -160,6 +165,7 @@ async function run() {
       const query = {};
       const { isPublic, email } = req.query;
       // console.log(isPublic);
+    
       if (isPublic) {
         query.visibility = isPublic;
       }
