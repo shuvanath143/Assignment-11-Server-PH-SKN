@@ -26,8 +26,8 @@ const verifyFirebaseToken = async (req, res, next) => {
   const token = req.headers.authorization
 
   if (!token) {
-    res.status(401).send({ message: 'unauthorized access' })
-    next()
+    return res.status(401).send({ message: 'unauthorized access' })
+
   }
 
   try {
@@ -74,7 +74,7 @@ async function run() {
       const email = req.decoded_email;
       const query = { email };
       const user = await usersCollection.findOne(query);
-      // console.log("Verify Admin: ", user.role);
+      console.log("Verify Admin: ", user.role);
 
       if (!user || user.role !== "admin") {
         return res.status(403).send({ message: "Forbidden access" });
@@ -538,6 +538,47 @@ async function run() {
         console.error(err);
         res.status(500).send({ error: "Failed to update access level" });
       }
+    });
+
+    //! *********************** Admin Api ******************************
+    app.get("/admin/lessons", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const result = await lessonsCollection.find().toArray()
+      res.send(result)
+    })
+
+    app.patch("/admin/lessons/:id/:visibility", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const lessonId = req.params.id
+      const visibility = req.params.visibility
+      console.log(visibility)
+      const query = { _id: new ObjectId(lessonId) }
+      const updatedDoc = {
+        $set: {
+          visibility: visibility
+        }
+      }
+      const result = await lessonsCollection.updateOne(query, updatedDoc)
+      res.send(result)
+    })
+
+    // app.patch("/admin/lessons/access/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+    //   const lessonId = req.params.id
+    //   const { accessLevel } = req.body
+    //  console.log(accessLevel)
+    //   const query = { _id: new ObjectId(lessonId) }
+    //   const updatedDoc = {
+    //     $set: {
+    //       accessLevel: accessLevel,
+    //     },
+    //   };
+    //   const result = await lessonsCollection.updateOne(query, updatedDoc)
+    //   res.send(result)
+    // })
+
+    app.delete("/admin/lessons/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await lessonsCollection.deleteOne(query);
+      res.send(result);
     });
 
     //! ***************** Payment Gateway ******************************
