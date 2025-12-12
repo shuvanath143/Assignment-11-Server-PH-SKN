@@ -245,13 +245,19 @@ async function run() {
     });
 
     //! *********************** My lessons api ****************************
-    app.get("/lessons/user/:email", async (req, res) => {
+    app.get("/lessons/user/:email", verifyFirebaseToken, async (req, res) => {
+
       try {
         const email = req.params.email;
         const query = {};
-        if (email) {
-          query.creatorEmail = email;
+        if (!email) {
+          return res
+            .status(401)
+            .send({ message: "Authentication required: User email missing." });
         }
+        
+        query.creatorEmail = email;
+        
         const lessons = await lessonsCollection
           .find(query)
           .sort({ createdAt: -1 })
@@ -271,7 +277,7 @@ async function run() {
       }
     });
 
-    app.patch("/lessons/:id/visibility", async (req, res) => {
+    app.patch("/lessons/:id/visibility", verifyFirebaseToken, async (req, res) => {
       try {
         const lessonId = req.params.id;
         const { visibility } = req.body; // expected: "public" or "private"
@@ -287,6 +293,31 @@ async function run() {
         res.status(500).send({ error: "Failed to update visibility" });
       }
     });
+
+    app.patch("/lessons/:id", verifyFirebaseToken, async (req, res) => {
+      try {
+        const lessonId = req.params.id
+        const data = req.body
+        // console.log(data)
+        const query = { _id: new ObjectId(lessonId) };
+        const updatedDoc = {
+          $set: data
+        }
+        const result = await lessonsCollection.updateOne(query, updatedDoc);
+        // console.log(result)
+        res.send(result)
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({ error: "Failed to update visibility" });
+      }
+    })
+
+    app.delete("/lessons/:id", verifyFirebaseToken, async (req, res) => {
+      const id = req.params.id
+      const query = { _id: new ObjectId(id) }
+      const result = await lessonsCollection.deleteOne(query)
+      res.send(result)
+    })
 
     //! ***************** Favorite Lessons Api ******************************
     app.get("/lessons/favorite", verifyFirebaseToken, async (req, res) => {
@@ -398,13 +429,13 @@ async function run() {
       res.send(lesson);
     });
 
-    //! ***************** Report Lesson ********************************
+    //! ******************* Report Lesson ***********************************
     app.post("/lesson-reports", verifyFirebaseToken, async (req, res) => {
       try {
         const { lessonId, reporterUserId, reason } = req.body;
         const query = {
           _id: new ObjectId(lessonId),
-        }
+        };
         // Fetch lesson details once
         const lesson = await lessonsCollection.findOne(query);
 
@@ -421,7 +452,9 @@ async function run() {
           timestamp: new Date(),
         };
 
-        const lessonReportCount = await lessonsCollection.updateOne(query, { $inc: { reportsCount: 1 }} );
+        const lessonReportCount = await lessonsCollection.updateOne(query, {
+          $inc: { reportsCount: 1 },
+        });
         const result = await lessonReportsCollection.insertOne(report);
         res.send(result);
       } catch (error) {
@@ -429,19 +462,24 @@ async function run() {
       }
     });
 
-    app.get("/lesson-reports", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      try {
-        const query = {}
-        const reports = await lessonReportsCollection
-          .find(query)
-          .sort({ timestamp: -1 })
-          .toArray();
+    app.get(
+      "/lesson-reports",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const query = {};
+          const reports = await lessonReportsCollection
+            .find(query)
+            .sort({ timestamp: -1 })
+            .toArray();
 
-        res.send(reports);
-      } catch (error) {
-        res.status(500).send({ error: error.message });
+          res.send(reports);
+        } catch (error) {
+          res.status(500).send({ error: error.message });
+        }
       }
-    });
+    );
 
     app.patch(
       "/lesson-reports/:id",
@@ -463,7 +501,23 @@ async function run() {
       }
     );
 
+    //! *************** User Dashboard Changing Api ********************
+    app.patch("/lessons/:id/access", async (req, res) => {
+      try {
+        const lessonId = req.params.id;
+        const { accessLevel } = req.body; // expected: "free" or "premium"
 
+        const result = await lessonsCollection.updateOne(
+          { _id: new ObjectId(lessonId) },
+          { $set: { accessLevel } }
+        );
+
+        res.send({ success: result.modifiedCount > 0 });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update access level" });
+      }
+    });
 
     //! ***************** Payment Gateway ******************************
     app.post("/create-checkout-session", async (req, res) => {
