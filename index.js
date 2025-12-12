@@ -102,6 +102,7 @@ async function run() {
     app.get("/users/:email", async (req, res) => {
       const email = req.params.email;
       const query = { email };
+      console.log(email)
       // console.log(query.role, query.isPremium);
       if (req.query.role) {
         const user = await usersCollection.findOne(query);
@@ -110,6 +111,11 @@ async function run() {
       if (req.query.isPremium) {
         const user = await usersCollection.findOne(query);
         res.send({ isPremium: user?.isPremium || false });
+      }
+      else {
+        const user = await usersCollection.findOne(query);
+        console.log(user)
+        res.send(user)
       }
     });
 
@@ -142,23 +148,32 @@ async function run() {
       res.send(result);
     });
 
-    app.patch(
-      "/users/:id/role",
-      verifyFirebaseToken,
-      verifyAdmin,
+    app.patch("/users/:id/role", verifyFirebaseToken, verifyAdmin,
       async (req, res) => {
         const id = req.params.id;
-        const roleInfo = req.body;
+        const { role } = req.body;
+        // console.log(roleInfo)
         const query = { _id: new ObjectId(id) };
         const updatedDoc = {
           $set: {
-            role: roleInfo.role,
+            role: role,
           },
         };
         const result = await usersCollection.updateOne(query, updatedDoc);
         res.send(result);
       }
     );
+
+    app.delete("/users/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id
+      if (id) {
+        const result = await usersCollection.deleteOne({ _id: new ObjectId(id) })
+        return res.send(result);
+      }
+      else {
+        return res.status(400).send({message: "invalid Id"})
+      }
+    })
 
     //! ************************* lessons api ****************************
     app.get("/lessons", async (req, res) => {
