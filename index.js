@@ -465,7 +465,7 @@ async function run() {
         const report = {
           lessonId,
           lessonTitle: lesson.title,
-          lessonCreator: lesson.creator,
+          lessonCreatorEmail: lesson.creatorEmail,
           lessonCategory: lesson.category,
           reporterUserId,
           reason,
@@ -503,16 +503,16 @@ async function run() {
     );
 
     app.patch(
-      "/lesson-reports/:id",
+      "/lesson-reports/:id/status",
       verifyFirebaseToken,
       verifyAdmin,
       async (req, res) => {
         try {
           const reportId = req.params.id;
-
+          const { status } = req.body
           const result = await lessonReportsCollection.updateOne(
             { _id: new ObjectId(reportId) },
-            { $set: { status: "reviewed" } }
+            { $set: { status: status } }
           );
 
           res.send(result);
