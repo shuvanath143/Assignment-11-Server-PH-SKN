@@ -510,11 +510,12 @@ async function run() {
         try {
           const reportId = req.params.id;
           const { status } = req.body
+          console.log(status)
           const result = await lessonReportsCollection.updateOne(
             { _id: new ObjectId(reportId) },
             { $set: { status: status } }
           );
-
+          console.log(result)
           res.send(result);
         } catch (error) {
           res.status(500).send({ error: error.message });
