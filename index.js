@@ -178,16 +178,22 @@ async function run() {
     //! ************************* lessons api ****************************
     app.get("/lessons", async (req, res) => {
       const query = {};
-      const { isPublic, email } = req.query;
+      const { isPublic, email, category, id } = req.query;
       // console.log(isPublic);
     
       if (isPublic) {
         query.visibility = isPublic;
+        query.isReviewed = 'reviewed'
       }
       if (email) {
         query.creatorEmail = email;
       }
+      if (category && id) {
+        query.category = category;
+        query._id = { $ne: new ObjectId(id) };
+      }
       const result = await lessonsCollection.find(query).toArray();
+      console.log('query',query, result)
       res.send(result);
     });
 
@@ -532,6 +538,23 @@ async function run() {
         const result = await lessonsCollection.updateOne(
           { _id: new ObjectId(lessonId) },
           { $set: { accessLevel } }
+        );
+
+        res.send({ success: result.modifiedCount > 0 });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Failed to update access level" });
+      }
+    });
+
+    app.patch("/reviewed/lessons/:id", async (req, res) => {
+      try {
+        const lessonId = req.params.id;
+        const { isReviewed } = req.body; // expected: "free" or "premium"
+
+        const result = await lessonsCollection.updateOne(
+          { _id: new ObjectId(lessonId) },
+          { $set: { isReviewed } }
         );
 
         res.send({ success: result.modifiedCount > 0 });
