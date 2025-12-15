@@ -106,16 +106,16 @@ async function run() {
       // console.log(query.role, query.isPremium);
       if (req.query.role) {
         const user = await usersCollection.findOne(query);
-        res.send({ role: user?.role || "user" });
+        return res.send({ role: user?.role || "user" });
       }
       if (req.query.isPremium) {
         const user = await usersCollection.findOne(query);
-        res.send({ isPremium: user?.isPremium || false });
+        return res.send({ isPremium: user?.isPremium || false });
       }
       else {
         const user = await usersCollection.findOne(query);
         console.log(user)
-        res.send(user)
+        return res.send(user)
       }
     });
 
@@ -347,6 +347,48 @@ async function run() {
     })
 
     //! ***************** Favorite Lessons Api ******************************
+    app.get("/lessons/favorite/lessons-content", verifyFirebaseToken, async (req, res) => {
+      try {
+        const email = req.query.email;
+        const query = { email: email };
+        const favoritesLessons = await favoriteLessonsCollection
+          .findOne(query)
+        // console.log(favoritesLessons)
+        // console.log("fav less", Array.isArray(favoritesLessons.favorites));
+        if (!favoritesLessons || !Array.isArray(favoritesLessons.favorites))
+          return res.send([]);
+
+        const lessonIds = favoritesLessons.favorites.map(
+          (id) => new ObjectId(id)
+        );
+        // console.log('lessonids', lessonIds)
+        const lessonQuery = { _id: { $in: lessonIds } };
+        const lessons = await lessonsCollection
+          .find(lessonQuery)
+          .project({
+            title: 1,
+            category: 1,
+            emotionalTone: 1,
+            creatorName: 1,
+            createdAt: 1,
+          })
+          .toArray();
+        // console.log(lessons)
+        const result = lessons.map((lesson) => ({
+          _id: favoritesLessons._id,
+          lessonId: lesson._id,
+          lessonTitle: lesson.title,
+          category: lesson.category,
+          emotionalTone: lesson.emotionalTone,
+          creatorName: lesson.creatorName,
+        }));
+        console.log(result)
+        res.send(result);
+      } catch (error) {
+        return res.status(500).send({message: 'Failed to load favorite lessons'})
+      }
+    })
+
     app.get("/lessons/favorite", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
       console.log("in favorite", email);
@@ -363,6 +405,80 @@ async function run() {
       async (req, res) => {
         const lessonId = req.params.id;
         console.log(lessonId);
+        //   const userId = new ObjectId(req.user.id);
+        const userEmail = req.query.email;
+
+        const query = { email: userEmail };
+
+        if (!userEmail) {
+          return res
+            .status(401)
+            .send({ message: "Authentication required: User email missing." });
+        }
+
+        try {
+          // get the user’s record
+          const lessonQuery = { _id: new ObjectId(lessonId) };
+          let userFavorites = await favoriteLessonsCollection.findOne(query);
+
+          // create empty record if none exists
+          if (!userFavorites) {
+            userFavorites = {
+              email: userEmail,
+              favorites: [lessonId],
+              favoritesCount: 1,
+            };
+            const result = await favoriteLessonsCollection.insertOne(
+              userFavorites
+            );
+            const lessonUpdateResult = await lessonsCollection.updateOne(
+              lessonQuery,
+              { $inc: { favoritesCount: 1 } }
+            );
+            return res.send(result);
+          }
+
+          const isFav = userFavorites.favorites
+            ?.map((id) => id.toString())
+            .includes(lessonId.toString());
+
+          // Toggle operation
+          const updateOperation = isFav
+            ? {
+                $pull: { favorites: lessonId },
+                $inc: { favoritesCount: -1 },
+              }
+            : {
+                // prevent duplicates automatically
+                $addToSet: { favorites: lessonId },
+                $inc: { favoritesCount: 1 },
+              };
+
+          const result = await favoriteLessonsCollection.updateOne(
+            query,
+            updateOperation
+          );
+
+          const lessonUpdatedDoc = isFav
+            ? { $inc: { favoritesCount: -1 } }
+            : { $inc: { favoritesCount: 1 } };
+          await lessonsCollection.updateOne(lessonQuery, lessonUpdatedDoc);
+
+          return res.send(result);
+        } catch (error) {
+          console.error(error);
+          res.status(500).send({ message: "Failed to update favorite" });
+        }
+      }
+    );
+
+    app.patch(
+      "/favorites/remove/:id/:lessonId",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const favId = req.params.id;
+        const lessonId = req.params.lessonId;
+        console.log(favId);
         //   const userId = new ObjectId(req.user.id);
         const userEmail = req.query.email;
 
@@ -570,9 +686,23 @@ async function run() {
       res.send(result)
     })
 
-    app.patch("/admin/lessons/:id/:visibility", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+    app.patch("/admin/lessons/feature/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
       const lessonId = req.params.id
-      const visibility = req.params.visibility
+      const { isFeatured } = req.body
+      console.log(isFeatured)
+      const query = { _id: new ObjectId(lessonId) }
+      const updatedDoc = {
+        $set: {
+          isFeatured: isFeatured,
+        },
+      };
+      const result = await lessonsCollection.updateOne(query, updatedDoc)
+      res.send(result)
+    })
+
+    app.patch("/admin/lessons/:id/visibility", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+      const lessonId = req.params.id
+      const {visibility} = req.body
       console.log(visibility)
       const query = { _id: new ObjectId(lessonId) }
       const updatedDoc = {
@@ -583,6 +713,8 @@ async function run() {
       const result = await lessonsCollection.updateOne(query, updatedDoc)
       res.send(result)
     })
+
+    
 
     // app.patch("/admin/lessons/access/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
     //   const lessonId = req.params.id
