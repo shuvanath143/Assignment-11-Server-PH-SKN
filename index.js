@@ -184,6 +184,22 @@ async function run() {
     })
 
     //! ************************* lessons api ****************************
+    app.get("/totalLessons/user/:creatorEmail", verifyFirebaseToken, async (req, res) => {
+      try {
+        const creatorEmail = req.params.creatorEmail
+        const query = {
+          creatorEmail: creatorEmail
+        }
+        const lessonCount = await lessonsCollection.countDocuments(query)
+        if (!lessonCount) 
+          return res.status(404).send({ message: "not found" })
+        console.log(lessonCount)
+        res.send(lessonCount)
+      } 
+      catch (error) {
+        res.status(500).send({ message: "Internal server error" });
+      }
+    })
     app.get("/lessons/:id", verifyFirebaseToken, async (req, res) => {
       // console.log(req.params.id)
       try {
