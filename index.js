@@ -99,10 +99,18 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users/:email", async (req, res) => {
+    app.get("/checkUsers/:email", async (req, res) => {
+      const email = req.params.email;
+      console.log(email)
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      return res.send(user);
+    });
+
+    app.get("/users/:email", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
       const query = { email };
-      // console.log(email)
+      console.log(email)
       // console.log(query.role, query.isPremium);
       if (req.query.role) {
         const user = await usersCollection.findOne(query);
@@ -876,7 +884,7 @@ async function run() {
           paymentStatus: session.payment_status,
           paidAt: new Date(),
         };
-
+        console.log(payment)
         await paymentCollection.insertOne(payment);
 
         return res.send({
