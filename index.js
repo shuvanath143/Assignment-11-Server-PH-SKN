@@ -10,38 +10,35 @@ const port = process.env.PORT || 3000;
 // Firebase Token
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./digital-life-lessons-skn143-firebase-adminsdk.json");
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-
 // middleware
-app.use(express.json())
-app.use(cors())
+app.use(express.json());
+app.use(cors());
 
 const verifyFirebaseToken = async (req, res, next) => {
-  // console.log('Headers in middleware: ', req.header.authorization)
-  const token = req.headers.authorization
-  
-  if (!token) {
-    return res.status(401).send({ message: 'unauthorized access' })
+  // ('Headers in middleware: ', req.header.authorization)
+  const token = req.headers.authorization;
 
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
   }
 
   try {
-    const idToken = token.split(' ')[1]
-    const decoded = await admin.auth().verifyIdToken(idToken)
-    // console.log('After decoded in token: ', decoded)
-    req.decoded_email = decoded.email
-    next()
-  } 
-  catch (error) {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    // ('After decoded in token: ', decoded)
+    req.decoded_email = decoded.email;
+    next();
+  } catch (error) {
     return res.status(401).send({ message: "invalid token" });
   }
-}
-
+};
 
 // db connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.0dhjrwr.mongodb.net/?appName=Cluster0`;
@@ -52,7 +49,7 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 
 async function run() {
@@ -68,13 +65,13 @@ async function run() {
     const lessonReportsCollection = db.collection("reports");
     const commentsCollection = db.collection("comments");
 
-    //! ************ Middleware with Database Access *******************
+    // ************ Middleware with Database Access *******************
     // this verification must be used after verifyFirebaseToken
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded_email;
       const query = { email };
       const user = await usersCollection.findOne(query);
-      console.log("Verify Admin: ", user.role);
+    //   ("Verify Admin: ", user.role);
 
       if (!user || user.role !== "admin") {
         return res.status(403).send({ message: "Forbidden access" });
@@ -82,7 +79,7 @@ async function run() {
       next();
     };
 
-    //! ************************* users api ****************************
+    // ************************* users api ****************************
     app.get("/users/search", verifyFirebaseToken, async (req, res) => {
       const searchText = req.query.searchText;
       const query = {};
@@ -101,7 +98,7 @@ async function run() {
 
     app.get("/checkUsers/:email", async (req, res) => {
       const email = req.params.email;
-      console.log(email)
+    //   (email);
       const query = { email };
       const user = await usersCollection.findOne(query);
       return res.send(user);
@@ -110,8 +107,8 @@ async function run() {
     app.get("/users/:email", verifyFirebaseToken, async (req, res) => {
       const email = req.params.email;
       const query = { email };
-      console.log(email)
-      // console.log(query.role, query.isPremium);
+    //   (email);
+      // (query.role, query.isPremium);
       if (req.query.role) {
         const user = await usersCollection.findOne(query);
         return res.send({ role: user?.role || "user" });
@@ -119,11 +116,10 @@ async function run() {
       if (req.query.isPremium) {
         const user = await usersCollection.findOne(query);
         return res.send({ isPremium: user?.isPremium || false });
-      }
-      else {
+      } else {
         const user = await usersCollection.findOne(query);
-        // console.log(user)
-        return res.send(user)
+        // (user)
+        return res.send(user);
       }
     });
 
@@ -132,19 +128,19 @@ async function run() {
       const query = {};
 
       if (email) {
-        query.email = email
+        query.email = email;
       }
       const user = await usersCollection.find(query).toArray();
-      // console.log(user)
+      // (user)
       return res.send(user);
     });
 
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
-      user.isPremium = false
-      user.favorites = []
-      user.createdAt = new Date()
+      user.isPremium = false;
+      user.favorites = [];
+      user.createdAt = new Date();
 
       const email = user.email;
       const userExists = await usersCollection.findOne({ email });
@@ -156,11 +152,14 @@ async function run() {
       res.send(result);
     });
 
-    app.patch("/users/:id/role", verifyFirebaseToken, verifyAdmin,
+    app.patch(
+      "/users/:id/role",
+      verifyFirebaseToken,
+      verifyAdmin,
       async (req, res) => {
         const id = req.params.id;
         const { role } = req.body;
-        // console.log(roleInfo)
+        // (roleInfo)
         const query = { _id: new ObjectId(id) };
         const updatedDoc = {
           $set: {
@@ -172,43 +171,52 @@ async function run() {
       }
     );
 
-    app.delete("/users/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id
-      if (id) {
-        const result = await usersCollection.deleteOne({ _id: new ObjectId(id) })
-        return res.send(result);
-      }
-      else {
-        return res.status(400).send({message: "invalid Id"})
-      }
-    })
-
-    //! ************************* lessons api ****************************
-    app.get("/totalLessons/user/:creatorEmail", verifyFirebaseToken, async (req, res) => {
-      try {
-        const creatorEmail = req.params.creatorEmail
-        const query = {
-          creatorEmail: creatorEmail
+    app.delete(
+      "/users/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        if (id) {
+          const result = await usersCollection.deleteOne({
+            _id: new ObjectId(id),
+          });
+          return res.send(result);
+        } else {
+          return res.status(400).send({ message: "invalid Id" });
         }
-        const lessonCount = await lessonsCollection.countDocuments(query)
-        if (!lessonCount) 
-          return res.status(404).send({ message: "not found" })
-        console.log(lessonCount)
-        res.send(lessonCount)
-      } 
-      catch (error) {
-        res.status(500).send({ message: "Internal server error" });
       }
-    })
+    );
+
+    // ************************* lessons api ****************************
+    app.get(
+      "/totalLessons/user/:creatorEmail",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const creatorEmail = req.params.creatorEmail;
+          const query = {
+            creatorEmail: creatorEmail,
+          };
+          const lessonCount = await lessonsCollection.countDocuments(query);
+          if (!lessonCount)
+            return res.status(404).send({ message: "not found" });
+        //   (lessonCount);
+          res.send(lessonCount);
+        } catch (error) {
+          res.status(500).send({ message: "Internal server error" });
+        }
+      }
+    );
     app.get("/lessons/:id", verifyFirebaseToken, async (req, res) => {
-      // console.log(req.params.id)
+      // (req.params.id)
       try {
         const id = req.params?.id;
-        console.log(id);
+        // (id);
         const lesson = await lessonsCollection.findOne({
           _id: new ObjectId(id),
         });
-          // console.log(lesson)
+        // (lesson)
 
         if (!lesson) return res.status(404).send({ message: "Not found" });
 
@@ -224,7 +232,7 @@ async function run() {
           { _id: new ObjectId(id) },
           { $inc: { views: 1 } }
         );
-        // console.log("Lesson", lesson);
+        // ("Lesson", lesson);
         res.send(lesson);
       } catch (error) {
         res.status(500).send({ message: "Internal server error" });
@@ -234,11 +242,11 @@ async function run() {
     app.get("/lessons", async (req, res) => {
       const query = {};
       const { isPublic, email, category, id } = req.query;
-      // console.log(isPublic);
-    
+      // (isPublic);
+
       if (isPublic) {
         query.visibility = isPublic;
-        query.isReviewed = 'reviewed'
+        query.isReviewed = "reviewed";
       }
       if (email) {
         query.creatorEmail = email;
@@ -248,7 +256,7 @@ async function run() {
         query._id = { $ne: new ObjectId(id) };
       }
       const result = await lessonsCollection.find(query).toArray();
-      // console.log('query',query, result)
+      // ('query',query, result)
       res.send(result);
     });
 
@@ -267,7 +275,7 @@ async function run() {
     app.patch("/lessons/like/:id", verifyFirebaseToken, async (req, res) => {
       const lessonId = req.params.id;
       const userEmail = req.query.email;
-      //   console.log(lessonId, userEmail)
+      //   (lessonId, userEmail)
 
       if (!userEmail) {
         return res
@@ -303,7 +311,7 @@ async function run() {
         });
 
         if (updateResult.modifiedCount === 0) {
-          // console.log(updateResult.modifiedCount);
+          // (updateResult.modifiedCount);
           return res.status(200).send({
             message: isLiked
               ? "Already disliked or no change made."
@@ -319,16 +327,15 @@ async function run() {
           newLikesCount: lesson.likesCount + updateCount,
         });
       } catch (error) {
-        console.error("Error updating like status:", error);
+        // console.error("Error updating like status:", error);
         res.status(500).send({
           message: "Failed to update like status.",
         });
       }
     });
 
-    //! *********************** My lessons api ****************************
+    // *********************** My lessons api ****************************
     app.get("/lessons/user/:email", verifyFirebaseToken, async (req, res) => {
-
       try {
         const email = req.params.email;
         const query = {};
@@ -337,9 +344,9 @@ async function run() {
             .status(401)
             .send({ message: "Authentication required: User email missing." });
         }
-        
+
         query.creatorEmail = email;
-        
+
         const lessons = await lessonsCollection
           .find(query)
           .sort({ createdAt: -1 })
@@ -354,103 +361,114 @@ async function run() {
 
         res.send(enrichedLessons);
       } catch (err) {
-        console.error(err);
+        // console.error(err);
         res.status(500).send({ error: "Failed to fetch lessons" });
       }
     });
 
-    app.patch("/lessons/:id/visibility", verifyFirebaseToken, async (req, res) => {
+    app.patch(
+      "/lessons/:id/visibility",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const lessonId = req.params.id;
+          const { visibility } = req.body; // expected: "public" or "private"
+
+          const result = await lessonsCollection.updateOne(
+            { _id: new ObjectId(lessonId) },
+            { $set: { visibility } }
+          );
+
+          res.send({ success: result.modifiedCount > 0 });
+        } catch (err) {
+          // console.error(err);
+          res.status(500).send({ error: "Failed to update visibility" });
+        }
+      }
+    );
+
+    app.patch("/lessons/:id", verifyFirebaseToken, async (req, res) => {
       try {
         const lessonId = req.params.id;
-        const { visibility } = req.body; // expected: "public" or "private"
-
-        const result = await lessonsCollection.updateOne(
-          { _id: new ObjectId(lessonId) },
-          { $set: { visibility } }
-        );
-
-        res.send({ success: result.modifiedCount > 0 });
-      } catch (err) {
-        console.error(err);
+        const data = req.body;
+        // (data)
+        const query = { _id: new ObjectId(lessonId) };
+        const updatedDoc = {
+          $set: data,
+        };
+        const result = await lessonsCollection.updateOne(query, updatedDoc);
+        // (result)
+        res.send(result);
+      } catch (error) {
+        // (error);
         res.status(500).send({ error: "Failed to update visibility" });
       }
     });
 
-    app.patch("/lessons/:id", verifyFirebaseToken, async (req, res) => {
-      try {
-        const lessonId = req.params.id
-        const data = req.body
-        // console.log(data)
-        const query = { _id: new ObjectId(lessonId) };
-        const updatedDoc = {
-          $set: data
-        }
-        const result = await lessonsCollection.updateOne(query, updatedDoc);
-        // console.log(result)
-        res.send(result)
-      } catch (error) {
-        // console.log(error);
-        res.status(500).send({ error: "Failed to update visibility" });
-      }
-    })
-
     app.delete("/lessons/:id", verifyFirebaseToken, async (req, res) => {
-      const id = req.params.id
-      const query = { _id: new ObjectId(id) }
-      const result = await lessonsCollection.deleteOne(query)
-      res.send(result)
-    })
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await lessonsCollection.deleteOne(query);
+      res.send(result);
+    });
 
-    //! ***************** Favorite Lessons Api ******************************
-    app.get("/lessons/favorite/lessons-content", verifyFirebaseToken, async (req, res) => {
-      try {
-        const email = req.query.email;
-        const query = { email: email };
-        const favoritesLessons = await favoriteLessonsCollection
-          .findOne(query)
-        // console.log(favoritesLessons)
-        // console.log("fav less", Array.isArray(favoritesLessons.favorites));
-        if (!favoritesLessons || !Array.isArray(favoritesLessons.favorites))
-          return res.send([]);
+    // ***************** Favorite Lessons Api ******************************
+    app.get(
+      "/lessons/favorite/lessons-content",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const email = req.query.email;
+          const query = { email: email };
+          const favoritesLessons = await favoriteLessonsCollection.findOne(
+            query
+          );
+          // (favoritesLessons)
+          // ("fav less", Array.isArray(favoritesLessons.favorites));
+          if (!favoritesLessons || !Array.isArray(favoritesLessons.favorites))
+            return res.send([]);
 
-        const lessonIds = favoritesLessons.favorites.map(
-          (id) => new ObjectId(id)
-        );
-        // console.log('lessonids', lessonIds)
-        const lessonQuery = { _id: { $in: lessonIds } };
-        const lessons = await lessonsCollection
-          .find(lessonQuery)
-          .project({
-            title: 1,
-            category: 1,
-            emotionalTone: 1,
-            creatorName: 1,
-            createdAt: 1,
-          })
-          .toArray();
-        // console.log(lessons)
-        const result = lessons.map((lesson) => ({
-          _id: favoritesLessons._id,
-          lessonId: lesson._id,
-          lessonTitle: lesson.title,
-          category: lesson.category,
-          emotionalTone: lesson.emotionalTone,
-          creatorName: lesson.creatorName,
-        }));
-        // console.log(result)
-        res.send(result);
-      } catch (error) {
-        return res.status(500).send({message: 'Failed to load favorite lessons'})
+          const lessonIds = favoritesLessons.favorites.map(
+            (id) => new ObjectId(id)
+          );
+          // ('lessonids', lessonIds)
+          const lessonQuery = { _id: { $in: lessonIds } };
+          const lessons = await lessonsCollection
+            .find(lessonQuery)
+            .project({
+              title: 1,
+              category: 1,
+              emotionalTone: 1,
+              creatorName: 1,
+              createdAt: 1,
+            })
+            .toArray();
+          // (lessons)
+          const result = lessons.map((lesson) => ({
+            _id: favoritesLessons._id,
+            lessonId: lesson._id,
+            lessonTitle: lesson.title,
+            category: lesson.category,
+            emotionalTone: lesson.emotionalTone,
+            creatorName: lesson.creatorName,
+          }));
+          // (result)
+          res.send(result);
+        } catch (error) {
+          return res
+            .status(500)
+            .send({ message: "Failed to load favorite lessons" });
+        }
       }
-    })
+    );
 
     app.get("/favorite/lesson", verifyFirebaseToken, async (req, res) => {
       const email = req.query.email;
-      // console.log("in favorite", email);
+      // ("in favorite", email);
       if (!email) return res.status(400).send({ message: "Email required" });
       const query = { email: email };
       const userFav = await favoriteLessonsCollection.findOne(query);
-      // console.log('fav lesson', userFav.favorites);
+      // ('fav lesson', userFav.favorites);
       res.send(userFav?.favorites || []);
     });
 
@@ -459,7 +477,7 @@ async function run() {
       verifyFirebaseToken,
       async (req, res) => {
         const lessonId = req.params.id;
-        // console.log(lessonId)
+        // (lessonId)
         //   const userId = new ObjectId(req.user.id);
         const userEmail = req.query.email;
 
@@ -521,7 +539,7 @@ async function run() {
 
           return res.send(result);
         } catch (error) {
-          console.error(error);
+          // console.error(error);
           res.status(500).send({ message: "Failed to update favorite" });
         }
       }
@@ -533,7 +551,7 @@ async function run() {
       async (req, res) => {
         const favId = req.params.id;
         const lessonId = req.params.lessonId;
-        // console.log(favId);
+        // (favId);
         //   const userId = new ObjectId(req.user.id);
         const userEmail = req.query.email;
 
@@ -595,18 +613,16 @@ async function run() {
 
           return res.send(result);
         } catch (error) {
-          console.error(error);
+          // console.error(error);
           res.status(500).send({ message: "Failed to update favorite" });
         }
       }
     );
 
-    
-
-    //! ******************* Comments Api ***********************************
+    // ******************* Comments Api ***********************************
     app.get("/comments", async (req, res) => {
-      const { lessonId, skip, limit } = req.query
-      console.log(lessonId, skip, limit)
+      const { lessonId, skip, limit } = req.query;
+    //   (lessonId, skip, limit);
       if (!lessonId) {
         return res.status(400).send({ message: "lessonId is required" });
       }
@@ -620,15 +636,15 @@ async function run() {
         .skip(skipValue)
         .limit(limitValue)
         .toArray();
-      const totalCount = await commentsCollection.countDocuments(query)
+      const totalCount = await commentsCollection.countDocuments(query);
       const result = {
         comments,
-        totalCount
-      }
-      console.log(result)
-      res.send(result)
-    })
-    
+        totalCount,
+      };
+    //   (result);
+      res.send(result);
+    });
+
     app.post("/comments", verifyFirebaseToken, async (req, res) => {
       try {
         const { lessonId, comment, userEmail, userName, userPhoto } = req.body;
@@ -653,12 +669,12 @@ async function run() {
           insertedId: result.insertedId,
         });
       } catch (error) {
-        console.error(error);
+        // console.error(error);
         res.status(500).send({ message: "Failed to post comment" });
       }
     });
 
-    //! ******************* Report Lesson ***********************************
+    // ******************* Report Lesson ***********************************
     app.post("/lesson-reports", verifyFirebaseToken, async (req, res) => {
       try {
         const { lessonId, reporterUserId, reason } = req.body;
@@ -717,13 +733,13 @@ async function run() {
       async (req, res) => {
         try {
           const reportId = req.params.id;
-          const { status } = req.body
-          // console.log(status)
+          const { status } = req.body;
+          // (status)
           const result = await lessonReportsCollection.updateOne(
             { _id: new ObjectId(reportId) },
             { $set: { status: status } }
           );
-          // console.log(result)
+          // (result)
           res.send(result);
         } catch (error) {
           res.status(500).send({ error: error.message });
@@ -731,7 +747,7 @@ async function run() {
       }
     );
 
-    //! *************** User Dashboard Changing Api ********************
+    // *************** User Dashboard Changing Api ********************
     app.patch("/lessons/:id/access", async (req, res) => {
       try {
         const lessonId = req.params.id;
@@ -744,7 +760,7 @@ async function run() {
 
         res.send({ success: result.modifiedCount > 0 });
       } catch (err) {
-        console.error(err);
+        // console.error(err);
         res.status(500).send({ error: "Failed to update access level" });
       }
     });
@@ -761,51 +777,64 @@ async function run() {
 
         res.send({ success: result.modifiedCount > 0 });
       } catch (err) {
-        console.error(err);
+        // console.error(err);
         res.status(500).send({ error: "Failed to update access level" });
       }
     });
 
-    //! *********************** Admin Api ******************************
-    app.get("/admin/lessons", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const result = await lessonsCollection.find().toArray()
-      res.send(result)
-    })
-
-    app.patch("/admin/lessons/feature/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const lessonId = req.params.id
-      const { isFeatured } = req.body
-      // console.log(isFeatured)
-      const query = { _id: new ObjectId(lessonId) }
-      const updatedDoc = {
-        $set: {
-          isFeatured: isFeatured,
-        },
-      };
-      const result = await lessonsCollection.updateOne(query, updatedDoc)
-      res.send(result)
-    })
-
-    app.patch("/admin/lessons/:id/visibility", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const lessonId = req.params.id
-      const {visibility} = req.body
-      // console.log(visibility)
-      const query = { _id: new ObjectId(lessonId) }
-      const updatedDoc = {
-        $set: {
-          visibility: visibility
-        }
+    // *********************** Admin Api ******************************
+    app.get(
+      "/admin/lessons",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const result = await lessonsCollection.find().toArray();
+        res.send(result);
       }
-      const result = await lessonsCollection.updateOne(query, updatedDoc)
-      res.send(result)
-    })
+    );
 
-    
+    app.patch(
+      "/admin/lessons/feature/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const lessonId = req.params.id;
+        const { isFeatured } = req.body;
+        // (isFeatured)
+        const query = { _id: new ObjectId(lessonId) };
+        const updatedDoc = {
+          $set: {
+            isFeatured: isFeatured,
+          },
+        };
+        const result = await lessonsCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
+
+    app.patch(
+      "/admin/lessons/:id/visibility",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const lessonId = req.params.id;
+        const { visibility } = req.body;
+        // (visibility)
+        const query = { _id: new ObjectId(lessonId) };
+        const updatedDoc = {
+          $set: {
+            visibility: visibility,
+          },
+        };
+        const result = await lessonsCollection.updateOne(query, updatedDoc);
+        res.send(result);
+      }
+    );
 
     // app.patch("/admin/lessons/access/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
     //   const lessonId = req.params.id
     //   const { accessLevel } = req.body
-    //  console.log(accessLevel)
+    //  (accessLevel)
     //   const query = { _id: new ObjectId(lessonId) }
     //   const updatedDoc = {
     //     $set: {
@@ -816,14 +845,19 @@ async function run() {
     //   res.send(result)
     // })
 
-    app.delete("/admin/lessons/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await lessonsCollection.deleteOne(query);
-      res.send(result);
-    });
+    app.delete(
+      "/admin/lessons/:id",
+      verifyFirebaseToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await lessonsCollection.deleteOne(query);
+        res.send(result);
+      }
+    );
 
-    //! ***************** Payment Gateway ******************************
+    // ***************** Payment Gateway ******************************
     app.post("/create-checkout-session", async (req, res) => {
       try {
         const paymentInfo = req.body;
@@ -853,7 +887,7 @@ async function run() {
 
         res.send({ url: session.url });
       } catch (err) {
-        console.log("STRIPE ERROR:", err);
+        // ("STRIPE ERROR:", err);
         res.status(500).send({ error: err.message });
       }
     });
@@ -863,7 +897,7 @@ async function run() {
       const sessionId = req.query.session_id;
 
       const session = await stripe.checkout.sessions.retrieve(sessionId);
-      // console.log(session)
+      // (session)
 
       const transactionId = session.payment_intent;
 
@@ -878,7 +912,7 @@ async function run() {
 
       if (session.payment_status === "paid") {
         const userId = session.metadata.userId;
-        // console.log("userId inside payment success: ", userId)
+        // ("userId inside payment success: ", userId)
         // update user
         await usersCollection.updateOne(
           { _id: new ObjectId(userId) },
@@ -900,7 +934,7 @@ async function run() {
           paymentStatus: session.payment_status,
           paidAt: new Date(),
         };
-        console.log(payment)
+        // (payment);
         await paymentCollection.insertOne(payment);
 
         return res.send({
@@ -913,11 +947,7 @@ async function run() {
       return res.send({ success: false });
     });
 
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
@@ -930,6 +960,4 @@ app.get("/", (req, res) => {
   res.send("Digital Life Lessons Platform is running");
 });
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
+
